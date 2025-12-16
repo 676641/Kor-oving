@@ -11,20 +11,25 @@ st.set_page_config(page_title="Øvingslogg", page_icon="🎶", layout="centered"
 st.title("🎶 Øvingslogg – juleferien")
 
 # ----------------------------
-# Konfig (faste valg)
+# Konfig
 # ----------------------------
-VOICE_GROUPS = {
-    "1. tenor": ["Martin", "Herman", "Trygve", "Kristoffer", "Håkon Gåskjenn"],
-    "2. tenor": ["Eirik", "Rasmus", "Julian", "Steffen", "Leon", "Emil", "Mikael", "Kristian"],
-    "1. bass":  ["Mats", "Birk", "Borgar", "Theo", "Jakob", "Harald", "Erling"],
-    "2. bass":  ["Maxi", "Erlend", "Andreas", "Håkon Aase", "Marcus", "Jens"],
-}
+MEMBERS = [
+    # 1. tenor
+    "Martin", "Herman", "Trygve", "Kristoffer", "Håkon Gåskjenn",
+    # 2. tenor
+    "Eirik", "Rasmus", "Julian", "Steffen", "Leon", "Emil", "Mikael", "Kristian",
+    # 1. bass
+    "Mats", "Birk", "Borgar", "Theo", "Jakob", "Harald", "Erling",
+    # 2. bass
+    "Maxi", "Erlend", "Andreas", "Håkon Aase", "Marcus", "Jens",
+]
 
 MINUTES = [10, 15, 20, 25, 30, 40, 45, 60, 75, 90]
 
 PRACTICE_ITEMS = [
     "Oppvarming",
     "Stemmeøvelser",
+    # eksempelsanger
     "Deilig er jorden",
     "O helga natt",
     "Glade jul",
@@ -79,6 +84,7 @@ def encode_entry_as_comment(entry: Dict[str, Any]) -> str:
 def extract_entries_from_comments(comments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     entries: List[Dict[str, Any]] = []
     pattern = re.compile(rf"{BEGIN}\s*```json\s*(\{{.*?\}})\s*```\s*{END}", re.DOTALL)
+
     for c in comments:
         body = c.get("body", "") or ""
         m = pattern.search(body)
@@ -89,6 +95,7 @@ def extract_entries_from_comments(comments: List[Dict[str, Any]]) -> List[Dict[s
             entries.append(json.loads(raw))
         except json.JSONDecodeError:
             continue
+
     return entries
 
 @st.cache_data(ttl=30)
@@ -96,7 +103,7 @@ def load_log_df(issue_number: int) -> pd.DataFrame:
     comments = list_issue_comments(issue_number)
     entries = extract_entries_from_comments(comments)
     if not entries:
-        return pd.DataFrame(columns=["ts", "date", "voice_group", "member", "minutes", "practiced"])
+        return pd.DataFrame(columns=["ts", "date", "member", "minutes", "practiced"])
 
     df = pd.DataFrame(entries)
     df["ts"] = pd.to_datetime(df["ts"], errors="coerce")
@@ -105,14 +112,12 @@ def load_log_df(issue_number: int) -> pd.DataFrame:
     return df
 
 # ----------------------------
-# Session state (for å skjule logg før submit)
+# Session state (skjul logg før submit)
 # ----------------------------
 if "show_log" not in st.session_state:
     st.session_state.show_log = False
 if "last_member" not in st.session_state:
     st.session_state.last_member = None
-if "last_voice_group" not in st.session_state:
-    st.session_state.last_voice_group = None
 
 # ----------------------------
 # UI
@@ -120,16 +125,14 @@ if "last_voice_group" not in st.session_state:
 issue_number = int(st.secrets["GITHUB_ISSUE_NUMBER"])
 
 with st.form("logg", clear_on_submit=True):
-    voice_group = st.selectbox("Stemmegruppe", list(VOICE_GROUPS.keys()), index=0)
-    member = st.selectbox("Hvem er du?", VOICE_GROUPS[voice_group], index=0)
-    minutes = st.selectbox("Hvor lenge øvde du?", MINUTES, index=MINUTES.index(30) if 30 in MINUTES else 0)
+    member = st.selectbox("Hvem er du?", MEMBERS)
+    minutes = st.selectbox("Hvor lenge øvde du?", MINUTES, index=MINUTES.index(30))
 
     st.write("Hva øvde du på?")
     practiced = []
     cols = st.columns(2)
     for i, opt in enumerate(PRACTICE_ITEMS):
-        col = cols[i % 2]
-        if col.checkbox(opt, value=False):
+        if cols[i % 2].checkbox(opt, value=False):
             practiced.append(opt)
 
     submit = st.form_submit_button("✅ Logg øving")
@@ -139,7 +142,6 @@ if submit:
         "v": 1,
         "ts": dt.datetime.now().isoformat(timespec="seconds"),
         "date": dt.date.today().isoformat(),
-        "voice_group": voice_group,
         "member": member,
         "minutes": int(minutes),
         "practiced": practiced,
@@ -150,11 +152,8 @@ if submit:
         st.success("Logget! 🎉")
         load_log_df.clear()
 
-        # vis logg først etter submit, og husk hvem som nettopp logget
         st.session_state.show_log = True
         st.session_state.last_member = member
-        st.session_state.last_voice_group = voice_group
-
         st.rerun()
     except requests.HTTPError as e:
         st.error(f"Klarte ikke å lagre til GitHub (HTTP-feil). {e}")
@@ -162,23 +161,17 @@ if submit:
         st.error(f"Noe gikk galt: {e}")
 
 # ----------------------------
-# Vis kun individuell logg (kun etter submit)
+# Vis individuell logg (kun etter submit)
 # ----------------------------
 if st.session_state.show_log and st.session_state.last_member:
     st.divider()
-    who = f"{st.session_state.last_member} ({st.session_state.last_voice_group})"
-    st.subheader(f"📒 Din øvingslogg: {who}")
+    st.subheader(f"📒 Din øvingslogg – {st.session_state.last_member}")
 
     df = load_log_df(issue_number)
-
-    # filtrer på personen som nettopp logget
-    df = df[
-        (df["member"] == st.session_state.last_member)
-        & (df["voice_group"] == st.session_state.last_voice_group)
-    ].copy()
+    df = df[df["member"] == st.session_state.last_member].copy()
 
     if df.empty:
-        st.info("Fant ingen logger for deg ennå.")
+        st.info("Ingen økter logget ennå.")
     else:
         df = df.sort_values("ts", ascending=False)
         df["practiced"] = df["practiced"].apply(lambda x: ", ".join(x) if isinstance(x, list) else "")
