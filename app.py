@@ -208,3 +208,50 @@ if submit:
 # Vis individuell logg (kun hvis bruker har trykket "Vis logg" eller har logget)
 if st.session_state.show_log and st.session_state.selected_member:
     render_member_log(issue_number, st.session_state.selected_member)
+
+# ----------------------------
+# Admin: leaderboard bak passord
+# ----------------------------
+st.divider()
+st.subheader("🔒 Admin")
+
+if "is_admin" not in st.session_state:
+    st.session_state.is_admin = False
+
+if not st.session_state.is_admin:
+    pwd = st.text_input("Admin-passord", type="password")
+    if st.button("Logg inn som admin"):
+        if pwd == st.secrets.get("ADMIN_PASSWORD", ""):
+            st.session_state.is_admin = True
+            st.success("Admin aktivert.")
+            st.rerun()
+        else:
+            st.error("Feil passord.")
+else:
+    st.success("Admin aktivert.")
+    if st.button("Logg ut admin"):
+        st.session_state.is_admin = False
+        st.rerun()
+
+    # Last alle logger og vis leaderboard
+    df_all = load_log_df(issue_number)
+
+    if df_all.empty:
+        st.info("Ingen logger ennå.")
+    else:
+        st.subheader("🏆 Leaderboard (totale minutter)")
+        lb = (
+            df_all.groupby("member", as_index=False)["minutes"]
+            .sum()
+            .sort_values("minutes", ascending=False)
+        )
+        st.dataframe(lb, use_container_width=True)
+
+        st.subheader("📈 Antall økter")
+        sessions = (
+            df_all.groupby("member", as_index=False)
+            .size()
+            .rename(columns={"size": "økter"})
+            .sort_values("økter", ascending=False)
+        )
+        st.dataframe(sessions, use_container_width=True)
