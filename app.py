@@ -166,8 +166,10 @@ with st.form("logg", clear_on_submit=True):
     practiced = []
     cols = st.columns(2)
     for i, opt in enumerate(PRACTICE_ITEMS):
-        if cols[i % 2].checkbox(opt, value=False):
+        label = f"⚔️ {opt}"
+        if cols[i % 2].checkbox(label, value=False):
             practiced.append(opt)
+
 
     col_a, col_b = st.columns(2)
     submit = col_a.form_submit_button("✅ Logg øving")
