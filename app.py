@@ -20,21 +20,14 @@ MEMBERS = [
 ]
 MINUTES = [10, 15, 20, 25, 30, 40, 45, 60, 75, 90]
 
-FOCUS_OPTIONS = [
+# Dette er nå "Hva øvde du på?" (checkboxes)
+PRACTICE_ITEMS = [
     "Oppvarming",
     "Stemmeøvelser",
-    "Intonasjon",
-    "Rytme",
-    "Tekst/uttale",
-    "Dynamikk/frase",
-]
-
-PIECES = [
+    # Eksempelsanger (foreløpig)
     "Deilig er jorden",
     "O helga natt",
     "Glade jul",
-    "White Christmas",
-    "Annen sang",
 ]
 
 # JSON markør i kommentar for enkel parsing
@@ -62,9 +55,6 @@ def post_issue_comment(issue_number: int, body: str) -> None:
     r.raise_for_status()
 
 def list_issue_comments(issue_number: int) -> List[Dict[str, Any]]:
-    """
-    Leser alle kommentarer (paginert).
-    """
     all_comments: List[Dict[str, Any]] = []
     page = 1
     while True:
@@ -110,16 +100,16 @@ def load_log_df(issue_number: int) -> pd.DataFrame:
     comments = list_issue_comments(issue_number)
     entries = extract_entries_from_comments(comments)
     if not entries:
-        return pd.DataFrame(columns=["ts", "date", "member", "minutes", "focus", "pieces"])
+        return pd.DataFrame(columns=["ts", "date", "member", "minutes", "practiced"])
     df = pd.DataFrame(entries)
-    # Normaliser litt
+
     df["ts"] = pd.to_datetime(df["ts"], errors="coerce")
     df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
     df["minutes"] = pd.to_numeric(df["minutes"], errors="coerce").fillna(0).astype(int)
     return df
 
 # ----------------------------
-# UI: kun dropdown + checkboxes (og multiselect)
+# UI
 # ----------------------------
 issue_number = int(st.secrets["GITHUB_ISSUE_NUMBER"])
 
@@ -127,18 +117,14 @@ with st.form("logg", clear_on_submit=True):
     member = st.selectbox("Hvem er du?", MEMBERS, index=0)
     minutes = st.selectbox("Hvor lenge øvde du?", MINUTES, index=MINUTES.index(30) if 30 in MINUTES else 0)
 
-    st.write("Hva gjorde du?")
-    focus_selected = []
+    st.write("Hva øvde du på?")
+    practiced = []
     cols = st.columns(2)
-    for i, opt in enumerate(FOCUS_OPTIONS):
+    for i, opt in enumerate(PRACTICE_ITEMS):
         col = cols[i % 2]
         if col.checkbox(opt, value=False):
-            focus_selected.append(opt)
+            practiced.append(opt)
 
-    pieces_selected = st.multiselect("Hvilke sanger/repertoar?", PIECES, default=[])
-
-    # Hvis dere vil ha *kun* dropdown/checkbox: vi bruker "i dag" automatisk
-    # (ingen date_input)
     submit = st.form_submit_button("✅ Logg øving")
 
 if submit:
@@ -148,15 +134,14 @@ if submit:
         "date": dt.date.today().isoformat(),
         "member": member,
         "minutes": int(minutes),
-        "focus": focus_selected,
-        "pieces": pieces_selected,
+        "practiced": practiced,   # <— her ligger alt som ble huket av
     }
 
     try:
         comment_body = encode_entry_as_comment(entry)
         post_issue_comment(issue_number, comment_body)
         st.success("Logget! 🎉")
-        load_log_df.clear()  # tving refresh av cache
+        load_log_df.clear()
         st.rerun()
     except requests.HTTPError as e:
         st.error(f"Klarte ikke å lagre til GitHub (HTTP-feil). {e}")
@@ -175,9 +160,8 @@ if df.empty:
 else:
     st.subheader("📒 Siste logger")
     show = df.sort_values("ts", ascending=False).copy()
-    show["focus"] = show["focus"].apply(lambda x: ", ".join(x) if isinstance(x, list) else "")
-    show["pieces"] = show["pieces"].apply(lambda x: ", ".join(x) if isinstance(x, list) else "")
-    st.dataframe(show[["date", "member", "minutes", "focus", "pieces"]], use_container_width=True)
+    show["practiced"] = show["practiced"].apply(lambda x: ", ".join(x) if isinstance(x, list) else "")
+    st.dataframe(show[["date", "member", "minutes", "practiced"]], use_container_width=True)
 
     st.subheader("🏆 Leaderboard")
     per_person = df.groupby("member", as_index=False)["minutes"].sum().sort_values("minutes", ascending=False)
@@ -186,4 +170,3 @@ else:
     st.subheader("📊 Totalt")
     st.metric("Totale minutter", int(df["minutes"].sum()))
     st.metric("Antall økter", int(len(df)))
-
