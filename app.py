@@ -164,10 +164,20 @@ with st.form("logg", clear_on_submit=True):
 
     st.write("Hva øvde du på?")
     practiced = []
+
     cols = st.columns(2)
     for i, opt in enumerate(PRACTICE_ITEMS):
-        label = f"⚔️ {opt}"
-        if cols[i % 2].checkbox(label, value=False):
+        col = cols[i % 2]
+        key = f"practice_{opt}"
+
+        selected = st.session_state.get(key, False)
+
+        label = f"⚔️ {opt}" if selected else f"⬜ {opt}"
+
+        if col.button(label, key=key):
+            st.session_state[key] = not selected
+
+        if st.session_state.get(key, False):
             practiced.append(opt)
 
 
