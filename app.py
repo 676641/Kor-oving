@@ -7,8 +7,8 @@ import pandas as pd
 import requests
 import streamlit as st
 
-st.set_page_config(page_title="Øvingslogg", page_icon="🎶", layout="centered")
-st.title("🎶 Øvingslogg – juleferien")
+st.set_page_config(page_title="Øvingslogg", page_icon="⚔️", layout="centered")
+st.title("⚔️ Øvingslogg – juleferien ⚔️")
 
 # ----------------------------
 # Konfig
