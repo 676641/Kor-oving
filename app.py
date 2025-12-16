@@ -26,13 +26,27 @@ MEMBERS = [
 
 MINUTES = [10, 15, 20, 25, 30, 40, 45, 60, 75, 90]
 
+# "Hva øvde du på?" (checkboxes)
 PRACTICE_ITEMS = [
     "Oppvarming",
     "Stemmeøvelser",
-    # eksempelsanger
-    "Deilig er jorden",
-    "O helga natt",
-    "Glade jul",
+    # sangliste
+    "Slått til riddere",
+    "Ridder kai",
+    "Akevitten",
+    "MAR-Schlägers vol. 2",
+    "Nå, e nu alla",
+    "Norge",
+    "Så rå",
+    "Gryning vid havet",
+    "Ode til 2. bass",
+    "Kjærlighet for en natt",
+    "Bergmannen",
+    "Now and forever",
+    "Der skåles",
+    "Slem",
+    "Olav Trygvason",
+    "Hjertet slår",
 ]
 
 BEGIN = "OVINGSLOGG_V1_BEGIN"
@@ -111,13 +125,33 @@ def load_log_df(issue_number: int) -> pd.DataFrame:
     df["minutes"] = pd.to_numeric(df["minutes"], errors="coerce").fillna(0).astype(int)
     return df
 
+def render_member_log(issue_number: int, member_name: str) -> None:
+    st.divider()
+    st.subheader(f"📒 Øvingslogg – {member_name}")
+
+    df = load_log_df(issue_number)
+    df = df[df["member"] == member_name].copy()
+
+    if df.empty:
+        st.info("Ingen økter logget ennå.")
+        return
+
+    df = df.sort_values("ts", ascending=False)
+    df["practiced"] = df["practiced"].apply(lambda x: ", ".join(x) if isinstance(x, list) else "")
+
+    st.dataframe(df[["date", "minutes", "practiced"]], use_container_width=True)
+
+    st.subheader("📊 Oppsummering")
+    st.metric("Totalt minutter", int(df["minutes"].sum()))
+    st.metric("Antall økter", int(len(df)))
+
 # ----------------------------
-# Session state (skjul logg før submit)
+# Session state
 # ----------------------------
 if "show_log" not in st.session_state:
     st.session_state.show_log = False
-if "last_member" not in st.session_state:
-    st.session_state.last_member = None
+if "selected_member" not in st.session_state:
+    st.session_state.selected_member = MEMBERS[0]
 
 # ----------------------------
 # UI
@@ -125,7 +159,7 @@ if "last_member" not in st.session_state:
 issue_number = int(st.secrets["GITHUB_ISSUE_NUMBER"])
 
 with st.form("logg", clear_on_submit=True):
-    member = st.selectbox("Hvem er du?", MEMBERS)
+    member = st.selectbox("Hvem er du?", MEMBERS, index=MEMBERS.index(st.session_state.selected_member))
     minutes = st.selectbox("Hvor lenge øvde du?", MINUTES, index=MINUTES.index(30))
 
     st.write("Hva øvde du på?")
@@ -135,8 +169,20 @@ with st.form("logg", clear_on_submit=True):
         if cols[i % 2].checkbox(opt, value=False):
             practiced.append(opt)
 
-    submit = st.form_submit_button("✅ Logg øving")
+    col_a, col_b = st.columns(2)
+    submit = col_a.form_submit_button("✅ Logg øving")
+    show_log = col_b.form_submit_button("📒 Vis logg")
 
+# Oppdater valgt medlem i state (så "Vis logg" alltid viser riktig)
+st.session_state.selected_member = member
+
+# "Vis logg" (uten å logge ny økt)
+if show_log:
+    st.session_state.show_log = True
+    # ikke nødvendigvis cache-clear her, bare vis det som finnes
+    st.rerun()
+
+# Logg øving
 if submit:
     entry = {
         "v": 1,
@@ -150,34 +196,15 @@ if submit:
     try:
         post_issue_comment(issue_number, encode_entry_as_comment(entry))
         st.success("Logget! 🎉")
-        load_log_df.clear()
+        load_log_df.clear()  # sørg for at ny logg kommer med
 
-        st.session_state.show_log = True
-        st.session_state.last_member = member
+        st.session_state.show_log = True  # vis logg etter submit også
         st.rerun()
     except requests.HTTPError as e:
         st.error(f"Klarte ikke å lagre til GitHub (HTTP-feil). {e}")
     except Exception as e:
         st.error(f"Noe gikk galt: {e}")
 
-# ----------------------------
-# Vis individuell logg (kun etter submit)
-# ----------------------------
-if st.session_state.show_log and st.session_state.last_member:
-    st.divider()
-    st.subheader(f"📒 Din øvingslogg – {st.session_state.last_member}")
-
-    df = load_log_df(issue_number)
-    df = df[df["member"] == st.session_state.last_member].copy()
-
-    if df.empty:
-        st.info("Ingen økter logget ennå.")
-    else:
-        df = df.sort_values("ts", ascending=False)
-        df["practiced"] = df["practiced"].apply(lambda x: ", ".join(x) if isinstance(x, list) else "")
-
-        st.dataframe(df[["date", "minutes", "practiced"]], use_container_width=True)
-
-        st.subheader("📊 Oppsummering")
-        st.metric("Totalt minutter", int(df["minutes"].sum()))
-        st.metric("Antall økter", int(len(df)))
+# Vis individuell logg (kun hvis bruker har trykket "Vis logg" eller har logget)
+if st.session_state.show_log and st.session_state.selected_member:
+    render_member_log(issue_number, st.session_state.selected_member)
