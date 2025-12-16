@@ -13,24 +13,23 @@ st.title("🎶 Øvingslogg – juleferien")
 # ----------------------------
 # Konfig (faste valg)
 # ----------------------------
-MEMBERS = [
-    "Sopran 1 – Anna", "Sopran 2 – Kari",
-    "Alt 1 – Ida", "Alt 2 – Mari",
-    "Tenor – Per", "Bass – Ola",
-]
+VOICE_GROUPS = {
+    "1. tenor": ["Martin", "Herman", "Trygve", "Kristoffer", "Håkon Gåskjenn"],
+    "2. tenor": ["Eirik", "Rasmus", "Julian", "Steffen", "Leon", "Emil", "Mikael", "Kristian"],
+    "1. bass":  ["Mats", "Birk", "Borgar", "Theo", "Jakob", "Harald", "Erling"],
+    "2. bass":  ["Maxi", "Erlend", "Andreas", "Håkon Aase", "Marcus", "Jens"],
+}
+
 MINUTES = [10, 15, 20, 25, 30, 40, 45, 60, 75, 90]
 
-# Dette er nå "Hva øvde du på?" (checkboxes)
 PRACTICE_ITEMS = [
     "Oppvarming",
     "Stemmeøvelser",
-    # Eksempelsanger (foreløpig)
     "Deilig er jorden",
     "O helga natt",
     "Glade jul",
 ]
 
-# JSON markør i kommentar for enkel parsing
 BEGIN = "OVINGSLOGG_V1_BEGIN"
 END = "OVINGSLOGG_V1_END"
 
@@ -80,7 +79,6 @@ def encode_entry_as_comment(entry: Dict[str, Any]) -> str:
 def extract_entries_from_comments(comments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     entries: List[Dict[str, Any]] = []
     pattern = re.compile(rf"{BEGIN}\s*```json\s*(\{{.*?\}})\s*```\s*{END}", re.DOTALL)
-
     for c in comments:
         body = c.get("body", "") or ""
         m = pattern.search(body)
@@ -88,11 +86,9 @@ def extract_entries_from_comments(comments: List[Dict[str, Any]]) -> List[Dict[s
             continue
         raw = m.group(1)
         try:
-            entry = json.loads(raw)
-            entries.append(entry)
+            entries.append(json.loads(raw))
         except json.JSONDecodeError:
             continue
-
     return entries
 
 @st.cache_data(ttl=30)
@@ -100,13 +96,23 @@ def load_log_df(issue_number: int) -> pd.DataFrame:
     comments = list_issue_comments(issue_number)
     entries = extract_entries_from_comments(comments)
     if not entries:
-        return pd.DataFrame(columns=["ts", "date", "member", "minutes", "practiced"])
-    df = pd.DataFrame(entries)
+        return pd.DataFrame(columns=["ts", "date", "voice_group", "member", "minutes", "practiced"])
 
+    df = pd.DataFrame(entries)
     df["ts"] = pd.to_datetime(df["ts"], errors="coerce")
     df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
     df["minutes"] = pd.to_numeric(df["minutes"], errors="coerce").fillna(0).astype(int)
     return df
+
+# ----------------------------
+# Session state (for å skjule logg før submit)
+# ----------------------------
+if "show_log" not in st.session_state:
+    st.session_state.show_log = False
+if "last_member" not in st.session_state:
+    st.session_state.last_member = None
+if "last_voice_group" not in st.session_state:
+    st.session_state.last_voice_group = None
 
 # ----------------------------
 # UI
@@ -114,7 +120,8 @@ def load_log_df(issue_number: int) -> pd.DataFrame:
 issue_number = int(st.secrets["GITHUB_ISSUE_NUMBER"])
 
 with st.form("logg", clear_on_submit=True):
-    member = st.selectbox("Hvem er du?", MEMBERS, index=0)
+    voice_group = st.selectbox("Stemmegruppe", list(VOICE_GROUPS.keys()), index=0)
+    member = st.selectbox("Hvem er du?", VOICE_GROUPS[voice_group], index=0)
     minutes = st.selectbox("Hvor lenge øvde du?", MINUTES, index=MINUTES.index(30) if 30 in MINUTES else 0)
 
     st.write("Hva øvde du på?")
@@ -132,41 +139,52 @@ if submit:
         "v": 1,
         "ts": dt.datetime.now().isoformat(timespec="seconds"),
         "date": dt.date.today().isoformat(),
+        "voice_group": voice_group,
         "member": member,
         "minutes": int(minutes),
-        "practiced": practiced,   # <— her ligger alt som ble huket av
+        "practiced": practiced,
     }
 
     try:
-        comment_body = encode_entry_as_comment(entry)
-        post_issue_comment(issue_number, comment_body)
+        post_issue_comment(issue_number, encode_entry_as_comment(entry))
         st.success("Logget! 🎉")
         load_log_df.clear()
+
+        # vis logg først etter submit, og husk hvem som nettopp logget
+        st.session_state.show_log = True
+        st.session_state.last_member = member
+        st.session_state.last_voice_group = voice_group
+
         st.rerun()
     except requests.HTTPError as e:
         st.error(f"Klarte ikke å lagre til GitHub (HTTP-feil). {e}")
     except Exception as e:
         st.error(f"Noe gikk galt: {e}")
 
-st.divider()
-
 # ----------------------------
-# Visning + leaderboard
+# Vis kun individuell logg (kun etter submit)
 # ----------------------------
-df = load_log_df(issue_number)
+if st.session_state.show_log and st.session_state.last_member:
+    st.divider()
+    who = f"{st.session_state.last_member} ({st.session_state.last_voice_group})"
+    st.subheader(f"📒 Din øvingslogg: {who}")
 
-if df.empty:
-    st.info("Ingen øvinger logget ennå.")
-else:
-    st.subheader("📒 Siste logger")
-    show = df.sort_values("ts", ascending=False).copy()
-    show["practiced"] = show["practiced"].apply(lambda x: ", ".join(x) if isinstance(x, list) else "")
-    st.dataframe(show[["date", "member", "minutes", "practiced"]], use_container_width=True)
+    df = load_log_df(issue_number)
 
-    st.subheader("🏆 Leaderboard")
-    per_person = df.groupby("member", as_index=False)["minutes"].sum().sort_values("minutes", ascending=False)
-    st.dataframe(per_person, use_container_width=True)
+    # filtrer på personen som nettopp logget
+    df = df[
+        (df["member"] == st.session_state.last_member)
+        & (df["voice_group"] == st.session_state.last_voice_group)
+    ].copy()
 
-    st.subheader("📊 Totalt")
-    st.metric("Totale minutter", int(df["minutes"].sum()))
-    st.metric("Antall økter", int(len(df)))
+    if df.empty:
+        st.info("Fant ingen logger for deg ennå.")
+    else:
+        df = df.sort_values("ts", ascending=False)
+        df["practiced"] = df["practiced"].apply(lambda x: ", ".join(x) if isinstance(x, list) else "")
+
+        st.dataframe(df[["date", "minutes", "practiced"]], use_container_width=True)
+
+        st.subheader("📊 Oppsummering")
+        st.metric("Totalt minutter", int(df["minutes"].sum()))
+        st.metric("Antall økter", int(len(df)))
